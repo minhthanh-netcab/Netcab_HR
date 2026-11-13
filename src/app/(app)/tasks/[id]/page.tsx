@@ -78,7 +78,18 @@ export default async function TaskPage({ params, searchParams }: { params: Promi
           />
         }
       />
-      <TaskProgress status={t.status} returned={!!returned} />
+      <TaskProgress
+        status={t.status}
+        returned={!!returned}
+        dates={{
+          assignedAt: t.createdAt,
+          startedAt: events.find((e) => e.kind === "start")?.at ?? null,
+          submittedAt: t.submittedAt ?? lastSubmit?.at ?? null,
+          returnedAt: returned?.at ?? null,
+          completedAt: t.completedAt,
+          dueDate: t.dueDate,
+        }}
+      />
       <Flash ok={sp.ok} err={sp.err} />
 
       <div className="grid gap-5 min-[900px]:grid-cols-3">

@@ -32,18 +32,18 @@ function Tooltip({ tip }: { tip: Tip }) {
   );
 }
 
-/** Theo dõi bề rộng thật của khung để vẽ SVG đúng tỉ lệ (không méo nét chữ) */
-function useWidth<T extends HTMLElement>(fallback = 480) {
+/** Theo dõi kích thước thật của khung để vẽ SVG đúng tỉ lệ (không méo nét chữ) */
+function useBox<T extends HTMLElement>(fallback = 480) {
   const ref = useRef<T>(null);
-  const [w, setW] = useState(fallback);
+  const [box, setBox] = useState({ w: fallback, h: 0 });
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    const ro = new ResizeObserver(([e]) => setW(Math.max(160, Math.round(e.contentRect.width))));
+    const ro = new ResizeObserver(([e]) => setBox({ w: Math.max(160, Math.round(e.contentRect.width)), h: Math.round(e.contentRect.height) }));
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  return [ref, w] as const;
+  return [ref, box.w, box.h] as const;
 }
 
 function Empty({ children }: { children: ReactNode }) {
@@ -122,7 +122,7 @@ export function Donut({
   };
 
   return (
-    <div className="flex flex-wrap items-center gap-x-5 gap-y-4">
+    <div className="flex flex-col items-center justify-center gap-4">
       <div ref={box} className="relative shrink-0" style={{ width: size, height: size }}>
         <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} role="img" aria-label={`${centerLabel ?? "Biểu đồ"}: ${segments.map((s) => `${s.label} ${s.value}`).join(", ")}`}>
           <g transform={`rotate(-90 ${size / 2} ${size / 2})`}>
@@ -168,12 +168,14 @@ export function Donut({
 /** Chú giải: ô màu + tên + số + %, có thể bấm để đi tới danh sách */
 function Legend({ segments, total, unit, active }: { segments: Segment[]; total: number; unit: string; active?: string | null }) {
   return (
-    <ul className="flex min-w-36 flex-1 flex-col gap-1.5 text-sm">
+    <ul className="flex w-full flex-col gap-1 text-[13px]">
       {segments.map((s) => {
         const inner = (
           <>
             <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: s.color }} />
-            <span className="min-w-0 flex-1 leading-tight text-slate-600">{s.label}</span>
+            <span className="min-w-0 flex-1 truncate whitespace-nowrap text-slate-600" title={s.label}>
+              {s.label}
+            </span>
             <span className="whitespace-nowrap font-semibold tabular-nums text-slate-900">{fmt(s.value, unit, 0)}</span>
             <span className="w-8 shrink-0 text-right text-xs tabular-nums text-slate-400">{total ? Math.round((s.value / total) * 100) : 0}%</span>
           </>
@@ -315,17 +317,26 @@ export function HBarChart({
                 className="viz-anim absolute left-0 top-1/2 h-3 -translate-y-1/2 rounded-r group-hover:brightness-110 group-focus-visible:ring-2 group-focus-visible:ring-brand-500"
                 style={{ width: pos(r.value), minWidth: r.value > 0 ? 4 : 0, background: color }}
               />
-              {target && <div className="absolute inset-y-0.5 w-0.5 rounded-full bg-slate-800" style={{ left: pos(target.value) }} />}
+              {/* Vạch mục tiêu: vùng rê chuột rộng 12px, chỉ hiện tên mốc khi rê vào (không ghi chú cố định) */}
+              {target && (
+                <div
+                  className="absolute inset-y-0 z-10 flex w-3 -translate-x-1/2 cursor-help justify-center"
+                  style={{ left: pos(target.value) }}
+                  aria-label={target.label}
+                  onPointerMove={(e) => {
+                    e.stopPropagation();
+                    setTip({ x: e.clientX - box.current!.getBoundingClientRect().left, y: 0, value: fmt(target.value, unit, 0), label: target.label });
+                  }}
+                  onPointerLeave={() => setTip(null)}
+                >
+                  <span className="h-full w-0.5 rounded-full bg-slate-800" />
+                </div>
+              )}
             </div>
             <span className="text-right font-medium tabular-nums text-slate-800">{fmt(r.value, unit, digits)}</span>
           </li>
         ))}
       </ul>
-      {target && (
-        <div className="mt-2 flex items-center gap-1.5 text-[11px] text-slate-500">
-          <span className="inline-block h-3 w-0.5 rounded-full bg-slate-800" /> {target.label}
-        </div>
-      )}
       <Tooltip tip={tip} />
     </div>
   );
@@ -375,11 +386,11 @@ export function ColumnChart({
           </div>
         ))}
       </div>
+      {/* Chỉ ghi tên cột; khoảng điểm (sub) nằm trong tooltip khi rê chuột */}
       <div className="mt-1.5 flex gap-2">
         {cols.map((c) => (
-          <div key={c.label} className="flex-1 text-center">
-            <div className="text-xs font-medium text-slate-700">{c.label}</div>
-            {c.sub && <div className="text-[10px] leading-tight text-slate-400">{c.sub}</div>}
+          <div key={c.label} className="flex-1 truncate text-center text-xs font-medium text-slate-700">
+            {c.label}
           </div>
         ))}
       </div>
@@ -401,9 +412,12 @@ export function LineChart({
   scale = 1,
   bands,
   emptyText = "Chưa có dữ liệu",
+  fill = false,
 }: {
   labels: string[];
   series: LineSeries[];
+  /** fill = false: chiều cao cố định; fill = true: chiều cao tối thiểu, biểu đồ giãn theo khung chứa */
+  fill?: boolean;
   height?: number;
   /** Giá trị trên cùng của trục (theo đơn vị đã nhân scale). Bỏ trống = tự tính */
   max?: number;
@@ -414,8 +428,10 @@ export function LineChart({
   bands?: { value: number; label: string }[];
   emptyText?: string;
 }) {
-  const [wrap, width] = useWidth<HTMLDivElement>();
+  const [wrap, width, boxH] = useBox<HTMLDivElement>();
   const [idx, setIdx] = useState<number | null>(null);
+  const minH = height;
+  height = fill ? Math.max(minH, boxH) : height;
   const id = useId();
   const hasData = series.some((s) => s.values.some((v) => v !== null));
   if (!hasData) return <Empty>{emptyText}</Empty>;
@@ -466,7 +482,7 @@ export function LineChart({
 
   const tipX = idx === null ? 0 : x(idx);
   return (
-    <div>
+    <div className={fill ? "flex flex-col" : ""}>
       {series.length > 1 && (
         <ul className="mb-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-600">
           {series.map((s) => (
@@ -477,11 +493,12 @@ export function LineChart({
           ))}
         </ul>
       )}
-      <div ref={wrap} className="relative">
+      {/* fill: khung tự giãn (flex-1), SVG nằm tuyệt đối bên trong nên không tự đẩy khung cao lên */}
+      <div ref={wrap} className={fill ? "relative flex-1" : "relative"} style={fill ? { minHeight: minH } : undefined}>
         <svg
           width={width}
           height={height}
-          className="block outline-none focus-visible:ring-2 focus-visible:ring-brand-500"
+          className={`block outline-none focus-visible:ring-2 focus-visible:ring-brand-500 ${fill ? "absolute left-0 top-0" : ""}`}
           tabIndex={0}
           role="img"
           aria-label={`${series.map((s) => s.label).join(", ")} theo thời gian. Dùng phím mũi tên trái/phải để xem từng mốc.`}
@@ -586,6 +603,110 @@ function niceStep(raw: number) {
   return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 2.5 ? 2.5 : n <= 5 ? 5 : 10) * p;
 }
 
+// ───────── Cột mềm: theo thời gian, cột đang chọn đậm hơn + tooltip nền tối ─────────
+
+/** label: nhãn ngắn dưới cột (VD "T9") · title: tên đầy đủ trong tooltip (VD "Tháng 9/2026") */
+export type SoftBar = { label: string; title?: string; value: number | null; rows?: { label: string; value: string }[] };
+
+const SOFT_IDLE = "linear-gradient(180deg, #e3e8fc 0%, #f1f3fe 100%)";
+const SOFT_ON = "linear-gradient(180deg, #7d8ff0 0%, #b3c0f7 100%)";
+const DOTS = ["#7dd3fc", "#a5b4fc", "#6366f1"];
+
+export function SoftBarChart({
+  bars,
+  height = 170,
+  max: fixedMax,
+  unit = "",
+  target,
+  emptyText = "Chưa có dữ liệu",
+}: {
+  bars: SoftBar[];
+  height?: number;
+  /** Giá trị trên cùng của trục; bỏ trống = tự tính */
+  max?: number;
+  unit?: string;
+  /** Vạch mốc nét đứt, VD 80% — chỉ ghi số mốc ở mép trái như vạch chia trục */
+  target?: { value: number; label: string };
+  emptyText?: string;
+}) {
+  const [hover, setHover] = useState<number | null>(null);
+  const last = bars.findLastIndex((b) => b.value !== null);
+  if (last < 0) return <Empty>{emptyText}</Empty>;
+  // Cột tô đậm: cột đang rê chuột, mặc định là kỳ mới nhất. Tooltip CHỈ hiện khi rê chuột / Tab tới.
+  const active = hover !== null && bars[hover].value !== null ? hover : last;
+  const top = fixedMax ?? Math.max(...bars.map((b) => b.value ?? 0), target?.value ?? 0) * 1.1;
+  const pct = (v: number) => Math.max(3, Math.min(100, (v / top) * 100));
+  const half = bars.length / 2;
+
+  // Vùng cột giãn theo chiều cao thẻ (tối thiểu `height`); cột vẽ bằng % nên tự co giãn
+  return (
+    <div className="flex gap-2">
+      {/* Cột trái: số mốc, thẳng hàng với vạch nét đứt */}
+      {target && (
+        <div className="flex w-7 shrink-0 flex-col" aria-hidden>
+          <div className="relative flex-1">
+            <span className="absolute right-0 translate-y-1/2 text-[10px] tabular-nums leading-none text-slate-400" style={{ bottom: `${pct(target.value)}%` }}>
+              {fmt(target.value, unit, 0)}
+            </span>
+          </div>
+          <div className="mt-2 h-4" />
+        </div>
+      )}
+      <div className="flex min-w-0 flex-1 flex-col">
+        <div className="relative flex-1" style={{ minHeight: height }} role="group" aria-label={target ? `Vạch nét đứt: ${target.label}` : undefined}>
+          {target && <div className="pointer-events-none absolute inset-x-0 border-t border-dashed border-slate-300" style={{ bottom: `${pct(target.value)}%` }} />}
+          <div className="absolute inset-0 flex items-end gap-1.5 sm:gap-3">
+            {bars.map((b, i) => {
+              const on = i === active;
+              const h = b.value === null ? 6 : pct(b.value);
+              // Tooltip đặt cạnh cột (không đè lên chính cột đang xem): nửa trái → bên phải cột, nửa phải → bên trái cột
+              // cột cao: mép trên tooltip ngang đỉnh cột; cột thấp: mép dưới tooltip ngang chân cột (không tràn xuống nhãn)
+              const side = `${i < half ? "left-full ml-2" : "right-full mr-2"} ${h > 50 ? "top-0" : "bottom-0"}`;
+              return (
+                <div
+                  key={b.label + i}
+                  tabIndex={b.value === null ? -1 : 0}
+                  aria-label={`${b.title ?? b.label}: ${b.value === null ? "chưa có dữ liệu" : fmt(b.value, unit)}`}
+                  className="relative flex h-full min-w-0 flex-1 cursor-default items-end justify-center outline-none"
+                  onPointerEnter={() => setHover(i)}
+                  onPointerLeave={() => setHover(null)}
+                  onFocus={() => setHover(i)}
+                  onBlur={() => setHover(null)}
+                >
+                  <div
+                    className={`viz-anim relative w-full max-w-11 rounded-[10px] ${b.value === null ? "bg-slate-100/70" : ""}`}
+                    style={{ height: `${h}%`, background: b.value === null ? undefined : on ? SOFT_ON : SOFT_IDLE }}
+                  >
+                    {hover === i && b.value !== null && (
+                      <div role="tooltip" className={`pointer-events-none absolute z-20 whitespace-nowrap rounded-lg bg-slate-800/95 px-3 py-2 text-[11px] text-white shadow-lg ${side}`}>
+                        <div className="mb-1 font-medium text-slate-300">{b.title ?? b.label}</div>
+                        {(b.rows ?? [{ label: "Giá trị", value: fmt(b.value, unit) }]).map((r, k) => (
+                          <div key={r.label} className="flex items-center gap-2">
+                            <span className="size-1.5 rounded-full" style={{ background: DOTS[k % DOTS.length] }} />
+                            <span className="text-slate-300">{r.label}</span>
+                            <span className="ml-auto pl-3 font-semibold tabular-nums">{r.value}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+        <div className="mt-2 flex h-4 gap-1.5 sm:gap-3">
+          {bars.map((b, i) => (
+            <div key={b.label + i} className={`min-w-0 flex-1 whitespace-nowrap text-center text-[11px] leading-4 ${i === active ? "font-semibold text-slate-700" : "text-slate-400"} ${i % 2 && i !== bars.length - 1 ? "max-sm:invisible" : ""}`}>
+              {b.label}
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ───────── Đồng hồ (gauge): 1 chỉ số so với mục tiêu ─────────
 
 export function Gauge({ value, target, label, sub }: { value: number | null; target: number; label: string; sub?: ReactNode }) {
@@ -620,9 +741,8 @@ export function Gauge({ value, target, label, sub }: { value: number | null; tar
 
 // ───────── Vòng tiến độ nhỏ ─────────
 
-export function ProgressRing({ done, total, label }: { done: number; total: number; label: string }) {
-  const size = 96;
-  const stroke = 10;
+export function ProgressRing({ done, total, label, size = 96 }: { done: number; total: number; label: string; size?: number }) {
+  const stroke = size >= 120 ? 14 : 10;
   const r = (size - stroke) / 2;
   const C = 2 * Math.PI * r;
   const f = total ? done / total : 0;
@@ -635,7 +755,7 @@ export function ProgressRing({ done, total, label }: { done: number; total: numb
         </g>
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <div className="text-lg font-semibold leading-none text-slate-900">{Math.round(f * 100)}%</div>
+        <div className={`font-semibold leading-none text-slate-900 ${size >= 120 ? "text-2xl" : "text-lg"}`}>{Math.round(f * 100)}%</div>
         <div className="mt-0.5 text-[10px] tabular-nums text-slate-500">
           {done}/{total}
         </div>

@@ -172,6 +172,8 @@ model User {
   employee     Employee? @relation(fields: [employeeId], references: [id], onDelete: SetNull)
   lastLoginAt  DateTime?
   createdAt    DateTime  @default(now())
+  /// Bố cục trang Tổng quan do người dùng tự sắp xếp: { [view]: [{ id, span }] } — null = mặc định
+  dashboardLayout Json?
 
   verifiedDocuments EmployeeDocument[] @relation("DocVerifier")
   decidedRequests   LeaveRequest[]     @relation("RequestDecider")
